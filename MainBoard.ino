@@ -1,5 +1,28 @@
 #include <SoftwareSerial.h>
 #include <Servo.h>
+/*
+  This example connects to a WPA2 Enterprise WiFi network.
+  Then it prints the MAC address of the WiFi module,
+  the IP address obtained, and other network details.
+
+  Based on ConnectWithWPA.ino by dlf (Metodo2 srl) and Tom Igoe
+*/
+#include <SPI.h>
+#include <ArduinoHttpClient.h>
+#include <WiFiNINA.h>
+#include "arduino_secrets.h"
+using namespace std;
+#define IFTTT_Key "dsjptALswZwGuM5dlyEKJh"
+#define IFTTT_Event "ESP_MotionSMS"
+///////please enter your sensitive data in the Secret tab/arduino_secrets.h
+char ssid[] = SECRET_SSID;  // your WPA2 enterprise network SSID (name)
+char user[] = SECRET_USER;  // your WPA2 enterprise username
+char pass[] = SECRET_PASS;  // your WPA2 enterprise password
+int status = WL_IDLE_STATUS;     // the WiFi radio's status
+const char* resource = "https://maker.ifttt.com/trigger/ESP_MotionSMS/with/key/dsjptALswZwGuM5dlyEKJh";
+const char* server = "maker.ifttt.com";
+WiFiClient client;
+HttpClient http(client, "maker.ifttt.com", 80);
 
 bool locked; // boolean for locked status
 // LEDs
@@ -23,8 +46,39 @@ int signal = 2; // communicating variable
 SoftwareSerial mySerial = SoftwareSerial(rx, tx);
 
 void setup() {
+  //Initialize serial and wait for port to open:
+  Serial.begin(9600);
+  while (!Serial) {
+    ; // wait for serial port to connect. Needed for native USB port only
+  }
+  // check for the WiFi module:
+  if (WiFi.status() == WL_NO_MODULE) {
+    Serial.println("Communication with WiFi module failed!");
+    // don't continue
+    while (true);
+  }
+  String fv = WiFi.firmwareVersion();
+  if (fv < WIFI_FIRMWARE_LATEST_VERSION) {
+    Serial.println("Please upgrade the firmware");
+  }
+  // attempt to connect to WiFi network:
+  while (status != WL_CONNECTED) {
+    Serial.print("Attempting to connect to WPA SSID: ");
+    Serial.println(ssid);
+    // Connect to WPA2 enterprise network:
+    // - You can optionally provide additional identity and CA cert (String) parameters if your network requires them:
+    //      WiFi.beginEnterprise(ssid, user, pass, identity, caCert)
+    status = WiFi.beginEnterprise(ssid, user, pass);
+
+    // wait 10 seconds for connection:
+    delay(10000);
+  }
+  // you're connected now, so print out the data:
+  Serial.print("You're connected to the network");
+  printCurrentNet();
+  printWifiData();
+  
   mySerial.begin(9600); // Begin the communication Serial at 9600 Baud
-  Serial.begin(9600); // Begin the Serial at 9600 Baud
   pinMode(red, OUTPUT);
   pinMode(green, OUTPUT);
   pinMode(Switch, INPUT);
@@ -37,6 +91,12 @@ void setup() {
 }
 
 void loop() {
+  /*
+  // check the network connection once every 10 seconds:
+  delay(10000);
+  printCurrentNet();
+  */
+  
   if (mySerial.available()) {
     signal = mySerial.read(); //Read the serial data and store in var
     Serial.print("Serial reading = ");
@@ -57,6 +117,7 @@ void loop() {
     digitalWrite(green, HIGH);
     if (locked != true) {
       // closes lock
+      sendEmail("A package has been delivered");
       delay(10000); // ten second delay after packege is dropped
       for (pos; pos <= 90; pos += 1) { // sweep the servo from 0 to 180 degrees in steps of 1 degrees
         // tell servo to go to position in variable 'pos'
@@ -100,11 +161,82 @@ void loop() {
   
   // code for alarm
   SwitchState = digitalRead(Switch);
-  if (SwitchState == LOW) {
+  if (SwitchState == HIGH) {
     digitalWrite(alarm, HIGH);
+    // take photo - camera module not working
+    // send Email notification
+    sendEmail("We have detected a potential disturbance with your package box");
     delay(10000); // alarm continues for 10 seconds
     digitalWrite(alarm, LOW);
   }
   
   delay(10);
+}
+
+// Functions for internet communication
+
+void sendEmail(String message){ // call to send email
+  Serial.println("making POST request");
+  String contentType = "application/json";
+  String postData = "{\"value1\":\"" + message + "\"}";
+
+  http.post("/trigger/ESP_MotionSMS/with/key/dsjptALswZwGuM5dlyEKJh", contentType, postData);
+
+  // read the status code and body of the response
+  int statusCode = http.responseStatusCode();
+  String response = http.responseBody();
+
+  Serial.print("Status code: ");
+  Serial.println(statusCode);
+  Serial.print("Response: ");
+  Serial.println(response);
+}
+
+void printWifiData() {
+  // print your board's IP address:
+  IPAddress ip = WiFi.localIP();
+  Serial.print("IP Address: ");
+  Serial.println(ip);
+
+  // print your MAC address:
+  byte mac[6];
+  WiFi.macAddress(mac);
+  Serial.print("MAC address: ");
+  printMacAddress(mac);
+}
+
+void printCurrentNet() {
+  // print the SSID of the network you're attached to:
+  Serial.print("SSID: ");
+  Serial.println(WiFi.SSID());
+
+  // print the MAC address of the router you're attached to:
+  byte bssid[6];
+  WiFi.BSSID(bssid);
+  Serial.print("BSSID: ");
+  printMacAddress(bssid);
+
+  // print the received signal strength:
+  long rssi = WiFi.RSSI();
+  Serial.print("signal strength (RSSI):");
+  Serial.println(rssi);
+
+  // print the encryption type:
+  byte encryption = WiFi.encryptionType();
+  Serial.print("Encryption Type:");
+  Serial.println(encryption, HEX);
+  Serial.println();
+}
+
+void printMacAddress(byte mac[]) {
+  for (int i = 5; i >= 0; i--) {
+    if (mac[i] < 16) {
+      Serial.print("0");
+    }
+    Serial.print(mac[i], HEX);
+    if (i > 0) {
+      Serial.print(":");
+    }
+  }
+  Serial.println();
 }
